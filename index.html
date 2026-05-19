@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebCrypto AES-GCM Tool</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #0d1117;
+            color: #c9d1d9;
+            max-width: 800px;
+            margin: 40px auto;
+            padding: 20px;
+        }
+        .container {
+            background: #161b22;
+            padding: 30px;
+            border-radius: 6px;
+            border: 1px solid #30363d;
+        }
+        h2 { margin-top: 0; color: #58a6ff; }
+        label { display: block; margin: 15px 0 5px; font-weight: 600; font-size: 0.9em; }
+        textarea, input {
+            width: 100%;
+            padding: 12px;
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            color: #c9d1d9;
+            box-sizing: border-box;
+            font-family: monospace;
+        }
+        textarea { height: 120px; resize: vertical; }
+        .actions { margin: 20px 0; display: flex; gap: 10px; }
+        button {
+            flex: 1;
+            padding: 12px;
+            border: 1px solid rgba(240,246,252,0.1);
+            border-radius: 6px;
+            font-weight: bold;
+            cursor: pointer;
+            font-size: 0.95em;
+        }
+        button.enc { background: #238636; color: #fff; }
+        button.enc:hover { background: #2ea043; }
+        button.dec { background: #21262d; color: #c9d1d9; border-color: #30363d; }
+        button.dec:hover { background: #30363d; border-color: #8b949e; }
+        .output-box { background: #0d1117; border-left: 4px solid #58a6ff; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>AES-256-GCM Cryptographic Tool</h2>
+    <p style="font-size: 0.85em; color: #8b949e; margin-top: -5px;">Client-side PBKDF2 key derivation & authenticated encryption.</p>
+    
+    <label for="password">Secret Password</label>
+    <input type="password" id="password" placeholder="Enter encryption key...">
+
+    <label for="inputText">Input Data</label>
+    <textarea id="inputText" placeholder="Enter plaintext to encrypt OR hex payload to decrypt..."></textarea>
+
+    <div class="actions">
+        <button class="enc" onclick="process(true)">Encrypt</button>
+        <button class="dec" onclick="process(false)">Decrypt</button>
+    </div>
+
+    <label for="outputText">Output Result</label>
+    <textarea id="outputText" class="output-box" readonly></textarea>
+</div>
+
+<script>
+    const bufferToHex = buf => Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+    const hexToBuffer = hex => new Uint8Array(hex.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
+    
+    const encoder = new TextEncoder();
+    const decoder = new TextDecoder();
+
+    async function deriveKey(password, salt) {
+        const baseKey = await window.crypto.subtle.importKey(
+            "raw", encoder.encode(password), "PBKDF2", false, ["deriveKey"]
+        );
+        return window.crypto.subtle.deriveKey(
+            { name: "PBKDF2", salt: salt, iterations: 100000, hash: "SHA-256" },
+            baseKey,
+            { name: "AES-GCM", length: 256 },
+            false,
+            ["encrypt", "decrypt"]
+        );
+    }
+
+    async function process(isEncrypt) {
+        const password = document.getElementById('password').value;
+        const input = document.getElementById('inputText').value.trim();
+        const outputField = document.getElementById('outputText');
+
+        if (!password || !input) {
+            alert("Both password and input fields are required.");
+            return;
+        }
+
+        try {
+            if (isEncrypt) {
+                const salt = window.crypto.getRandomValues(new Uint8Array(16));
+                const iv = window.crypto.getRandomValues(new Uint8Array(12));
+                const key = await deriveKey(password, salt);
+                
+                const encrypted = await window.crypto.subtle.encrypt(
+                    { name: "AES-GCM", iv: iv }, key, encoder.encode(input)
+                );
+
+                const payload = new Uint8Array(salt.length + iv.length + encrypted.byteLength);
+                payload.set(salt, 0);
+                payload.set(iv, salt.length);
+                payload.set(new Uint8Array(encrypted), salt.length + iv.length);
+
+                outputField.value = bufferToHex(payload.buffer);
+            } else {
+                const payload = hexToBuffer(input);
+                const salt = payload.slice(0, 16);
+                const iv = payload.slice(16, 28);
+                const ciphertext = payload.slice(28);
+
+                const key = await deriveKey(password, salt);
+                const decrypted = await window.crypto.subtle.decrypt(
+                    { name: "AES-GCM", iv: iv }, key, ciphertext
+                );
+
+                outputField.value = decoder.decode(decrypted);
+            }
+        } catch (e) {
+            outputField.value = "Authentication/Decryption Failed: Invalid key or corrupted payload.";
+        }
+    }
+</script>
+
+</body>
+</html>
